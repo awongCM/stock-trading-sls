@@ -14,5 +14,6 @@
 5. To annotate REST API guidelines
 6. To describe database schemas
 7. To decide whether this endpoints need some authorizer endpoint before consuming resource.
+8. To find the time to come up the fullfillment calclation logic as the next steps..
 
 #### NB - for serverless v3 to work; you need to install node v18 or above in order to make this work. For serverless v2; node 14 works better; In short, bear in mind which local/global node/npm version you used for switching between serverless versions
