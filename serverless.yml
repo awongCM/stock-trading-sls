@@ -1,0 +1,140 @@
+service: stock-trading-sls
+frameworkVersion: '3'
+
+package:
+    excludeDevDependencies: false
+    exclude:
+        - .gitignore
+        - diagram.py
+        - '*.png'
+        - node_modules/**
+        - package.json
+        - README.md
+        
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-southeast-2
+  memorySize: 512
+  timeout: 120
+  iam:
+    role:
+        statements:
+            -   Effect: Allow
+                Action: [ dynamodb:UpdateItem, dynamodb:GetItem, dynamodb:Scan, dynamodb:PutItem ]
+                Resource: { Fn::GetAtt: [ DynamoDBTable, Arn ] }
+            -   Effect: Allow
+                Action: [ events:PutEvents ]
+                Resource: { Fn::GetAtt: [ OrderEventBus, Arn ] }
+
+            
+  environment:
+      DYNAMODB_TABLE_NAME: ${self:custom.names.dynamodbTableName}
+      REGION: ${self:provider.region}
+      EVENT_BUS_NAME: ${self:custom.names.eventBusName}
+
+custom:
+  names:
+      resource: stock_trading_resource 
+      dynamodbTableName: order_book
+      eventBusName: trading_event_bus
+  output:
+      file: .serverless/output.json
+  capacities:
+      -   table: DynamoDBTable
+          read:
+              minimum: 10
+              maximum: 120
+          write:
+              minimum: 10
+              maximum: 120
+  
+
+functions:
+  fetchAllOrders:
+    handler: src/handlers/fetchAllOrders.handler
+    events:
+        - http:
+            path: /orders
+            method: get
+
+  processOrder:
+    handler: src/handlers/processOrder.handler
+    events:
+        - http:
+            path: /order
+            method: post
+
+  matchBuyOrderRule:
+    handler: src/handlers/matchBuyOrderRule.handler
+    events:
+        - eventBridge:
+            eventBus: {Ref: OrderEventBus}
+            pattern:
+                source: 
+                    -  "processOrderRoute"
+                detail-type: 
+                    -  "Buy Order"
+                detail: 
+                    action: 
+                        -  "Buy"
+
+  matchSellOrderRule:
+    handler: src/handlers/matchSellOrderRule.handler
+    events:
+        - eventBridge:
+            eventBus: {Ref: OrderEventBus}
+            pattern:
+                source: 
+                    -  "processOrderRoute"
+                detail-type: 
+                    -  "Sell Order"
+                detail: 
+                    action: 
+                        -  "Sell"
+  saveOrderToDbRule:
+    handler: src/handlers/saveOrderToDbRule.handler
+    events:
+        - eventBridge:
+            eventBus: {Ref: OrderEventBus}
+            pattern:
+                source: 
+                    - "matchOrderRoute"
+                detail-type: 
+                    - "Save Order"
+
+resources:
+  Resources:
+    DynamoDBTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            TableName: ${self:custom.names.dynamodbTableName}
+            AttributeDefinitions:
+                -   AttributeName: orderId
+                    AttributeType: N
+            KeySchema:
+                -   AttributeName: orderId
+                    KeyType: HASH
+            ProvisionedThroughput: 
+                ReadCapacityUnits: 1
+                WriteCapacityUnits: 1
+    OrderEventBus:
+       Type: AWS::Events::EventBus
+       Properties:
+           Name: ${self:custom.names.eventBusName}
+    OrderEventBridgePolicy:
+        Type: AWS::Events::EventBusPolicy
+        DependsOn: OrderEventBus
+        Properties:
+            Action: events:PutEvents
+            Principal: "*"
+            StatementId: OrderEventBridge
+            EventBusName: {Ref: OrderEventBus}
+    
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+  - serverless-dynamodb-autoscaling
+  - serverless-stack-output
